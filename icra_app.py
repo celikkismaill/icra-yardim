@@ -106,69 +106,65 @@ def guncelleme_kontrol(sessiz=False):
 
 def guncelleme_indir(parent, uzak_surum):
     """Yeni sürümü indir ve uygula"""
-    import urllib.request, ssl, shutil, threading
+    import urllib.request, ssl, shutil, threading, tempfile
 
     ilerleme_win = tk.Toplevel(parent)
     ilerleme_win.title("Güncelleme İndiriliyor...")
     ilerleme_win.configure(bg=CLR["bg"])
     ilerleme_win.resizable(False, False)
-    center_window(ilerleme_win, 420, 200)
+    center_window(ilerleme_win, 420, 220)
     ilerleme_win.grab_set()
 
     tk.Label(ilerleme_win, text="🔄  Güncelleme İndiriliyor",
              bg=CLR["bg"], fg=CLR["accent"], font=FT).pack(pady=(20,8))
     tk.Label(ilerleme_win, text=f"Sürüm {APP_SURUM} → {uzak_surum}",
              bg=CLR["bg"], fg=CLR["subtext"], font=FS).pack()
-
     pb = ttk.Progressbar(ilerleme_win, mode="indeterminate", length=300)
     pb.pack(pady=16); pb.start(12)
-
     durum_lbl = tk.Label(ilerleme_win, text="GitHub'dan indiriliyor...",
                           bg=CLR["bg"], fg=CLR["subtext"], font=FS)
     durum_lbl.pack()
 
     def indir_thread():
         try:
-            # Mevcut dosyayı yedekle
-            mevcut = os.path.abspath(sys.argv[0] if getattr(sys,"frozen",False) else __file__)
-            yedek  = mevcut + ".yedek"
-            shutil.copy2(mevcut, yedek)
-
             durum_lbl.config(text="Yeni sürüm indiriliyor...")
-
             ctx = ssl.create_default_context()
             ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
             req = urllib.request.urlopen(GUNCELLEME_URL, timeout=30, context=ctx)
             yeni_kod = req.read()
 
-            durum_lbl.config(text="Dosya yazılıyor...")
+            durum_lbl.config(text="Dosya kaydediliyor...")
 
-            # Yeni kodu kaydet
-            with open(mevcut, "wb") as f:
+            # EXE yanındaki icra_app.py dosyasını güncelle
+            hedef_py = os.path.join(BASE_DIR, "icra_app.py")
+
+            # Yedek al
+            if os.path.exists(hedef_py):
+                shutil.copy2(hedef_py, hedef_py + ".yedek")
+
+            with open(hedef_py, "wb") as f:
                 f.write(yeni_kod)
 
+            # Güncelleme tamamlandı — EXE yeniden oluşturulmalı
             pb.stop()
-            ilerleme_win.destroy()
+            try: ilerleme_win.destroy()
+            except: pass
 
-            # Başarı mesajı
-            if messagebox.askyesno("✅ Güncelleme Tamamlandı",
+            messagebox.showinfo("✅ Güncelleme Tamamlandı",
                 f"Sürüm {uzak_surum} başarıyla indirildi!\n\n"
-                "Değişikliklerin geçerli olması için program yeniden başlatılacak.\n"
-                "Şimdi yeniden başlatılsın mı?"):
-                # Programı yeniden başlat
-                import subprocess
-                subprocess.Popen([sys.executable, mevcut])
-                parent.destroy()
+                f"Yeni icra_app.py dosyası şuraya kaydedildi:\n{hedef_py}\n\n"
+                "Güncellemenin geçerli olması için:\n"
+                "1. CMD açın\n"
+                f"2. cd {BASE_DIR}\n"
+                "3. python -m PyInstaller --onefile --windowed --name IcraYardim icra_app.py --noconfirm\n"
+                "4. Yeni EXE ile setup oluşturun veya direkt dist\\IcraYardim.exe kullanın.")
 
         except Exception as e:
             pb.stop()
             try: ilerleme_win.destroy()
             except: pass
             messagebox.showerror("Güncelleme Hatası",
-                f"Güncelleme sırasında hata oluştu:\n{e}\n\n"
-                "Yedek dosya korundu (.yedek uzantılı).")
-
-    threading.Thread(target=indir_thread, daemon=True).start()
+                f"Güncelleme sırasında hata oluştu:\n{e}")
 
 
 def guncelleme_kontrol_ve_goster(parent, sessiz=False):
