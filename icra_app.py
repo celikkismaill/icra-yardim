@@ -20,7 +20,10 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
 BASE_DIR = os.path.dirname(os.path.abspath(sys.argv[0] if getattr(sys,"frozen",False) else __file__))
-DB_PATH  = os.path.join(BASE_DIR, "icra_veri.db")
+
+# Veritabanı her zaman EXE veya script ile aynı klasörde
+DB_PATH      = os.path.join(BASE_DIR, "icra_veri.db")
+HATIRLA_PATH = os.path.join(BASE_DIR, "hatirla.txt")
 
 # ── PDF Türkçe font ───────────────────────────────────────────────
 def kaydet_pdf_font():
@@ -69,11 +72,128 @@ FT = ("Segoe UI", 16, "bold")
 FS = ("Segoe UI", 11)
 FM = ("Segoe UI", 12)
 
+# ── Sürüm ve Güncelleme ───────────────────────────────────────────
+APP_SURUM    = "13.0"
+GITHUB_USER  = "celikkismaill"
+GITHUB_REPO  = "icra-yardim"
+GUNCELLEME_URL = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/icra_app.py"
+SURUM_URL      = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/surum.txt"
+
 DURUM_LISTESI = ["Açık","Kesinleşmiş","Haciz","İtirazlı","Kapalı"]
 TUR_LISTESI   = ["İdari Para Cezası","Kira","Vekalet Ücreti","Diğer Alacaklar"]
 ADMIN_USER    = "ismail"
 IMZACILAR     = [{"isim":"Dr. İsmail ÇELİK","unvan":"Şef"},
                  {"isim":"Ayşe BİLGİÇ","unvan":"Avukat"}]
+
+# ══════════════════════════════════════════════════════════════════
+# OTOMATİK GÜNCELLEME SİSTEMİ
+# ══════════════════════════════════════════════════════════════════
+def guncelleme_kontrol(sessiz=False):
+    """GitHub'dan yeni sürüm olup olmadığını kontrol et"""
+    try:
+        import urllib.request, ssl
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.urlopen(SURUM_URL, timeout=5, context=ctx)
+        uzak_surum = req.read().decode("utf-8").strip()
+        return uzak_surum
+    except Exception as e:
+        if not sessiz:
+            messagebox.showwarning("Bağlantı Hatası",
+                f"Güncelleme kontrolü yapılamadı.\nİnternet bağlantınızı kontrol edin.\n\nHata: {e}")
+        return None
+
+def guncelleme_indir(parent, uzak_surum):
+    """Yeni sürümü indir ve uygula"""
+    import urllib.request, ssl, shutil, threading
+
+    ilerleme_win = tk.Toplevel(parent)
+    ilerleme_win.title("Güncelleme İndiriliyor...")
+    ilerleme_win.configure(bg=CLR["bg"])
+    ilerleme_win.resizable(False, False)
+    center_window(ilerleme_win, 420, 200)
+    ilerleme_win.grab_set()
+
+    tk.Label(ilerleme_win, text="🔄  Güncelleme İndiriliyor",
+             bg=CLR["bg"], fg=CLR["accent"], font=FT).pack(pady=(20,8))
+    tk.Label(ilerleme_win, text=f"Sürüm {APP_SURUM} → {uzak_surum}",
+             bg=CLR["bg"], fg=CLR["subtext"], font=FS).pack()
+
+    pb = ttk.Progressbar(ilerleme_win, mode="indeterminate", length=300)
+    pb.pack(pady=16); pb.start(12)
+
+    durum_lbl = tk.Label(ilerleme_win, text="GitHub'dan indiriliyor...",
+                          bg=CLR["bg"], fg=CLR["subtext"], font=FS)
+    durum_lbl.pack()
+
+    def indir_thread():
+        try:
+            # Mevcut dosyayı yedekle
+            mevcut = os.path.abspath(sys.argv[0] if getattr(sys,"frozen",False) else __file__)
+            yedek  = mevcut + ".yedek"
+            shutil.copy2(mevcut, yedek)
+
+            durum_lbl.config(text="Yeni sürüm indiriliyor...")
+
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+            req = urllib.request.urlopen(GUNCELLEME_URL, timeout=30, context=ctx)
+            yeni_kod = req.read()
+
+            durum_lbl.config(text="Dosya yazılıyor...")
+
+            # Yeni kodu kaydet
+            with open(mevcut, "wb") as f:
+                f.write(yeni_kod)
+
+            pb.stop()
+            ilerleme_win.destroy()
+
+            # Başarı mesajı
+            if messagebox.askyesno("✅ Güncelleme Tamamlandı",
+                f"Sürüm {uzak_surum} başarıyla indirildi!\n\n"
+                "Değişikliklerin geçerli olması için program yeniden başlatılacak.\n"
+                "Şimdi yeniden başlatılsın mı?"):
+                # Programı yeniden başlat
+                import subprocess
+                subprocess.Popen([sys.executable, mevcut])
+                parent.destroy()
+
+        except Exception as e:
+            pb.stop()
+            try: ilerleme_win.destroy()
+            except: pass
+            messagebox.showerror("Güncelleme Hatası",
+                f"Güncelleme sırasında hata oluştu:\n{e}\n\n"
+                "Yedek dosya korundu (.yedek uzantılı).")
+
+    threading.Thread(target=indir_thread, daemon=True).start()
+
+
+def guncelleme_kontrol_ve_goster(parent, sessiz=False):
+    """Güncelleme kontrolü yap ve sonucu göster"""
+    uzak_surum = guncelleme_kontrol(sessiz=sessiz)
+    if not uzak_surum:
+        return
+
+    try:
+        mevcut_parca = [int(x) for x in APP_SURUM.split(".")]
+        uzak_parca   = [int(x) for x in uzak_surum.split(".")]
+        yeni_var = uzak_parca > mevcut_parca
+    except:
+        yeni_var = uzak_surum != APP_SURUM
+
+    if yeni_var:
+        if messagebox.askyesno("🔄 Güncelleme Mevcut",
+            f"Yeni sürüm bulundu!\n\n"
+            f"Mevcut sürüm : {APP_SURUM}\n"
+            f"Yeni sürüm   : {uzak_surum}\n\n"
+            "Şimdi güncellemek ister misiniz?"):
+            guncelleme_indir(parent, uzak_surum)
+    elif not sessiz:
+        messagebox.showinfo("✅ Güncel",
+            f"Program güncel! Sürüm {APP_SURUM}")
 
 # ── İller & ilçeler ──────────────────────────────────────────────
 ILLER = {
@@ -581,30 +701,41 @@ class LoginEkrani(tk.Toplevel):
         btn.pack(pady=14)
         btn.bind("<Enter>",lambda e:btn.config(bg="#a01010"))
         btn.bind("<Leave>",lambda e:btn.config(bg=CLR["red"]))
+
+        # Güncelleme butonu
+        tk.Frame(self,bg=CLR["border"],height=1).pack(fill="x",padx=30)
+        guncelle_btn=tk.Button(self,text="🔄  Güncellemeleri Kontrol Et",
+                               command=lambda:guncelleme_kontrol_ve_goster(self),
+                               bg=CLR["bg"],fg=CLR["subtext"],
+                               font=("Segoe UI",9),relief="flat",cursor="hand2",
+                               pady=8)
+        guncelle_btn.pack()
+        guncelle_btn.bind("<Enter>",lambda e:guncelle_btn.config(fg=CLR["accent"]))
+        guncelle_btn.bind("<Leave>",lambda e:guncelle_btn.config(fg=CLR["subtext"]))
+
+        # Sürüm bilgisi
+        tk.Label(self,text=f"Sürüm {APP_SURUM}",bg=CLR["bg"],
+                 fg=CLR["subtext"],font=("Segoe UI",8)).pack(pady=(0,8))
         e1.focus_set()
 
     def _yukle_hatirla(self, entry):
         """Kaydedilmiş kullanıcı adını yükle"""
         try:
-            hatirla_file=os.path.join(BASE_DIR,"hatirla.txt")
-            if os.path.exists(hatirla_file):
-                with open(hatirla_file,"r",encoding="utf-8") as f:
+            if os.path.exists(HATIRLA_PATH):
+                with open(HATIRLA_PATH,"r",encoding="utf-8") as f:
                     saved=f.read().strip()
                 if saved:
                     self.kadi_var.set(saved)
                     self.hatirla_var.set(True)
-                    # Odağı şifre alanına gönder
-                    self.after(100, lambda: entry.tk_focusPrev().focus_set() if hasattr(entry,'tk_focusPrev') else None)
         except: pass
 
     def _kaydet_hatirla(self):
         try:
-            hatirla_file=os.path.join(BASE_DIR,"hatirla.txt")
             if self.hatirla_var.get():
-                with open(hatirla_file,"w",encoding="utf-8") as f:
+                with open(HATIRLA_PATH,"w",encoding="utf-8") as f:
                     f.write(self.kadi_var.get().strip())
             else:
-                if os.path.exists(hatirla_file): os.remove(hatirla_file)
+                if os.path.exists(HATIRLA_PATH): os.remove(HATIRLA_PATH)
         except: pass
 
     def giris(self):
@@ -2100,6 +2231,16 @@ class App(tk.Tk):
         sag=tk.Frame(topbar,bg=CLR["menubar"]); sag.pack(side="right",padx=14)
         self.tarih_lbl=tk.Label(sag,text="",bg=CLR["menubar"],fg=CLR["subtext"],font=FS); self.tarih_lbl.pack(anchor="e")
         tk.Label(sag,text=f"👤 {self.aktif_kullanici['ad_soyad']}",bg=CLR["menubar"],fg=CLR["accent"],font=FS).pack(anchor="e")
+
+        # Güncelle butonu (sağ üst)
+        guncelle_topbar=tk.Button(topbar,text="🔄 Güncelle",
+                                   command=lambda:guncelleme_kontrol_ve_goster(self),
+                                   bg=CLR["menubar"],fg=CLR["subtext"],
+                                   font=("Segoe UI",9),relief="flat",cursor="hand2",
+                                   padx=8,pady=4)
+        guncelle_topbar.pack(side="right",padx=(0,8))
+        guncelle_topbar.bind("<Enter>",lambda e:guncelle_topbar.config(fg=CLR["accent"],bg=CLR["hover"]))
+        guncelle_topbar.bind("<Leave>",lambda e:guncelle_topbar.config(fg=CLR["subtext"],bg=CLR["menubar"]))
         self._guncelle_tarih()
 
         # ── Açılır menü çubuğu ──
@@ -2255,20 +2396,79 @@ class App(tk.Tk):
                 w.bind("<Leave>",  lambda e, ws=all_w, bg=alt_bg: hover_off(ws, bg))
 
             if sub_items:
-                def ac_alt(e, si=sub_items):
-                    # Önce eski alt paneli temizle
-                    for w in self._alt_container.winfo_children():
-                        w.destroy()
-                    self._alt_container.pack_forget()
-                    self._alt_container.pack(fill="x", padx=4, pady=2)
-                    tk.Frame(self._alt_container, bg=CLR["border"], height=1).pack(fill="x")
+                def ac_alt(e, si=sub_items, rf=row_frame):
+                    # Yana açılan alt popup
+                    if hasattr(self, '_aktif_alt_dropdown') and self._aktif_alt_dropdown:
+                        try: self._aktif_alt_dropdown.destroy()
+                        except: pass
+
+                    alt_popup = tk.Toplevel(self)
+                    alt_popup.overrideredirect(True)
+                    alt_popup.configure(bg=CLR["border"])
+                    alt_popup.attributes("-topmost", True)
+                    self._aktif_alt_dropdown = alt_popup
+
+                    alt_frame = tk.Frame(alt_popup, bg="#1C2B3A",
+                                        highlightthickness=2,
+                                        highlightbackground=CLR["accent"])
+                    alt_frame.pack(fill="both", expand=True)
+                    tk.Frame(alt_frame, bg=CLR["red"], height=3).pack(fill="x")
+
+                    def kapat_alt(event=None):
+                        try: alt_popup.destroy()
+                        except: pass
+                        self._aktif_alt_dropdown = None
+
                     for s_lbl, s_action in si:
-                        ekle_satir(self._alt_container, s_lbl, action=s_action,
-                                   alt_bg="#243447", indent=8)
-                    tk.Frame(self._alt_container, bg=CLR["border"], height=1).pack(fill="x")
+                        s_temiz = s_lbl.strip()
+                        s_ikon, s_renk = IKONLAR.get(s_temiz, ("›", CLR["subtext"]))
+                        s_row = tk.Frame(alt_frame, bg="#1C2B3A", cursor="hand2")
+                        s_row.pack(fill="x", pady=0)
+                        tk.Label(s_row, text=s_ikon, bg="#1C2B3A", fg=s_renk,
+                                 font=("Segoe UI",12), padx=12, pady=10).pack(side="left")
+                        s_txt = tk.Label(s_row, text=s_temiz, bg="#1C2B3A", fg="#FFFFFF",
+                                         font=("Segoe UI",10,"bold"), anchor="w", pady=10, padx=4)
+                        s_txt.pack(side="left", fill="x", expand=True)
+
+                        def s_hover_on(e, w=s_row, t=s_txt):
+                            w.config(bg="#2E5080"); t.config(bg="#2E5080")
+                            for c in w.winfo_children(): c.config(bg="#2E5080")
+                        def s_hover_off(e, w=s_row, t=s_txt):
+                            w.config(bg="#1C2B3A"); t.config(bg="#1C2B3A")
+                            for c in w.winfo_children(): c.config(bg="#1C2B3A")
+
+                        s_row.bind("<Enter>", s_hover_on)
+                        s_row.bind("<Leave>", s_hover_off)
+                        s_txt.bind("<Enter>", s_hover_on)
+                        s_txt.bind("<Leave>", s_hover_off)
+
+                        if s_action:
+                            def s_tikla(e, a=s_action):
+                                kapat_alt()
+                                kapat()
+                                self._menu_action(a)
+                            s_row.bind("<Button-1>", s_tikla)
+                            s_txt.bind("<Button-1>", s_tikla)
+                            for c in s_row.winfo_children():
+                                c.bind("<Button-1>", s_tikla)
+
+                    # Konumu: ana popup'un sağına hizala
+                    alt_popup.update_idletasks()
+                    # Ana popup konumunu al
                     popup.update_idletasks()
-                    popup.geometry(f"{popup.winfo_reqwidth()}x{popup.winfo_reqheight()}+"
-                                   f"{popup.winfo_x()}+{popup.winfo_y()}")
+                    px = popup.winfo_x() + popup.winfo_width()  # sağ kenar
+                    # tıklanan satırın dikey konumu
+                    rf.update_idletasks()
+                    py = rf.winfo_rooty()
+                    alt_w = 220
+                    alt_h = alt_popup.winfo_reqheight()
+                    # Ekran dışına taşmasın
+                    sw = self.winfo_screenwidth()
+                    if px + alt_w > sw:
+                        px = popup.winfo_x() - alt_w
+                    alt_popup.geometry(f"{alt_w}x{alt_h}+{px}+{py}")
+                    alt_popup.bind("<FocusOut>", lambda e: self.after(150, kapat_alt))
+                    alt_popup.focus_set()
 
                 for w in all_w:
                     w.bind("<Button-1>", ac_alt)
